@@ -51,9 +51,11 @@ const lease = await tempLease({
     maxEntries: 1_000,
     maxReaps: 100,
     maxConcurrency: 4,
-    maxBytes: 10 * 1024 ** 3,
+    maxBytes: Number.MAX_SAFE_INTEGER,
     maxTreeEntries: 100_000,
     maxDurationMs: 2_000,
+    maxRetries: 3,
+    retryDelayMs: 100,
   },
   signal,
 });
@@ -64,7 +66,7 @@ const lease = await tempLease({
 - `reap` is `true`, `false`, or a budget object. Default: `true`.
 - `signal` can stop creation before the directory is allocated and stops recovery from starting more work.
 
-Automatic recovery is deduplicated across concurrent and repeated creation in a namespace. The completed-root cache is capped at 1,024 entries, so an older namespace may be scanned again; that is safe. Call `reapTempLeases()` directly whenever you want another pass.
+Concurrent automatic recovery is deduplicated. A fully completed pass is cached for 30 seconds; an incomplete or failed pass is never cached, so later `tempLease()` calls continue the work. The completed-root cache is capped at 1,024 entries. Call `reapTempLeases()` directly whenever you want an immediate pass.
 
 ### `lease.dispose()`
 
@@ -96,20 +98,22 @@ Runs a bounded recovery pass and returns a complete receipt.
 const report = await reapTempLeases({ namespace: "my-downloader" });
 
 console.log(report.reaped);
-console.log(report.skipped); // live, unknown, foreign, over-budget, raced...
-console.log(report.errors); // inspect, measure, claim, or removal failures
+console.log(report.progressed); // partial trees safely queued for another pass
+console.log(report.skipped); // live, unknown, foreign, raced...
+console.log(report.errors); // claim, queue, or removal failures
 ```
 
 Defaults per pass:
 
 - inspect at most 1,000 direct children;
-- remove at most 100 workspaces;
-- measure/remove at most 4 workspaces concurrently;
-- remove at most 10 GiB of measured contents;
-- measure at most 100,000 entries per workspace;
-- stop starting new work after 2 seconds.
+- claim at most 100 workspace chunks;
+- remove at most 4 chunks concurrently;
+- remove at most `Number.MAX_SAFE_INTEGER` logical file bytes;
+- visit at most 100,000 entries in each chunk;
+- stop recovery work after 2 seconds;
+- retry transient filesystem failures 3 times with a 100 ms linear delay.
 
-Removal already in progress may finish after the time deadline. Raise budgets deliberately for unusually large artifact trees.
+When a byte, tree-entry, time, or abort limit stops a chunk, its partially cleaned workspace is atomically renamed to an ownerless queue entry. A later pass resumes it. This makes the defaults protective without turning a large workspace into a permanent leak. A custom `maxBytes` smaller than one remaining file cannot make progress until raised.
 
 ### `getTempLeaseRoot(options?)`
 
@@ -122,7 +126,8 @@ Returns the deterministic root path without creating it. This is useful for diag
 3. Recovery accepts only that exact name grammar and only real directories.
 4. `process.kill(pid, 0)` checks liveness. `EPERM`, an unreadable namespace, and any ambiguous result fail closed.
 5. A dead-owner directory is renamed within the same root before deletion. That atomic claim prevents two reapers from owning it.
-6. The claim itself records the reaper PID. If that process dies during deletion, a later process can recover the abandoned claim.
+6. Bounded removal uses `lstat` and never follows symlinks. If a chunk reaches a budget, the remainder is atomically renamed to an ownerless `.queued-v1-*` entry for the next pass.
+7. A claim records the reaper PID. If that process dies before queueing or completing deletion, a later process can recover the abandoned claim.
 
 PID reuse produces a safe false negative: an old workspace waits while an unrelated process holds the same PID. It does not produce a wrongful deletion.
 

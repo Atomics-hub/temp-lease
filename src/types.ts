@@ -8,16 +8,20 @@ export interface TempLeaseLocationOptions {
 export interface ReapBudgets {
   /** Maximum direct children inspected in one pass. Default: 1,000. */
   maxEntries?: number;
-  /** Maximum workspaces removed in one pass. Default: 100. */
+  /** Maximum workspace chunks claimed in one pass. Default: 100. */
   maxReaps?: number;
-  /** Maximum workspaces measured/removed concurrently. Default: 4. */
+  /** Maximum workspace chunks removed concurrently. Default: 4. */
   maxConcurrency?: number;
-  /** Maximum measured bytes removed in one pass. Default: 10 GiB. */
+  /** Maximum logical file bytes removed in one pass. Default: MAX_SAFE_INTEGER. */
   maxBytes?: number;
-  /** Maximum entries measured inside any one workspace. Default: 100,000. */
+  /** Maximum entries visited inside any one workspace per chunk. Default: 100,000. */
   maxTreeEntries?: number;
-  /** Stop starting new work after this many milliseconds. Default: 2,000. */
+  /** Stop recovery work after this many milliseconds. Default: 2,000. */
   maxDurationMs?: number;
+  /** Retries for transient filesystem operation failures. Default: 3. */
+  maxRetries?: number;
+  /** Linear retry delay in milliseconds. Default: 100. */
+  retryDelayMs?: number;
 }
 
 export interface ReapTempLeasesOptions
@@ -36,7 +40,6 @@ export interface CreateTempLeaseOptions extends TempLeaseLocationOptions {
 
 export type ReapSkipReason =
   | "aborted"
-  | "byte-budget"
   | "entry-budget"
   | "foreign"
   | "live-owner"
@@ -49,8 +52,17 @@ export type ReapSkipReason =
 
 export interface ReapedEntry {
   name: string;
-  kind: "lease" | "abandoned-reap";
+  kind: "lease" | "abandoned-reap" | "continued-reap";
   bytes: number;
+  entries: number;
+}
+
+export interface ProgressedEntry {
+  name: string;
+  queuedName: string;
+  reason: "aborted" | "byte-budget" | "entry-budget" | "time-budget";
+  bytes: number;
+  entries: number;
 }
 
 export interface SkippedEntry {
@@ -60,7 +72,7 @@ export interface SkippedEntry {
 
 export interface ReapError {
   name: string;
-  operation: "measure" | "claim" | "remove";
+  operation: "claim" | "queue" | "remove";
   code?: string;
   message: string;
 }
@@ -70,8 +82,9 @@ export interface ReapReport {
   startedAt: string;
   finishedAt: string;
   scanned: number;
-  measuredBytes: number;
+  removedBytes: number;
   reaped: ReapedEntry[];
+  progressed: ProgressedEntry[];
   skipped: SkippedEntry[];
   errors: ReapError[];
   truncated: boolean;

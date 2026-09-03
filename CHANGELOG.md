@@ -10,4 +10,8 @@ All notable changes to this project will be documented here.
 - Add atomic claims, concurrent-reaper safety, and recovery of interrupted reaping.
 - Add explicit `keep()` for detached ownership and persistent results.
 - Add entry, reap, byte, tree, time, and abort budgets with detailed receipts.
+- Make oversized cleanup resumable through atomic ownerless queue entries.
+- Retry transient claim and removal failures with bounded configurable backoff.
+- Retry incomplete automatic recovery instead of caching partial passes.
+- Preserve the claimed handle path when a post-rename inspection fails.
 - Ship ESM, CommonJS, and TypeScript declarations with no runtime dependencies.

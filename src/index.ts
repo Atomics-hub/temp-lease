@@ -5,6 +5,7 @@ import { generationToken, keptName, leaseName, reapingName } from "./names.js";
 import { directoryIdentity, sameIdentity } from "./identity.js";
 import { processNamespace } from "./platform.js";
 import { reapTempLeases } from "./reap.js";
+import { removeRecursively } from "./remove.js";
 import { ensureTempLeaseRoot } from "./root.js";
 import type {
   CreateTempLeaseOptions,
@@ -26,6 +27,7 @@ export type {
   CreateTempLeaseOptions,
   DisposeReceipt,
   KeepReceipt,
+  ProgressedEntry,
   ReapBudgets,
   ReapedEntry,
   ReapError,
@@ -38,8 +40,9 @@ export type {
 } from "./types.js";
 
 const recoveryInFlight = new Map<string, Promise<ReapReport>>();
-const recoveredRoots = new Map<string, true>();
+const recoveredRoots = new Map<string, number>();
 const MAX_RECOVERED_ROOTS = 1_024;
+const RECOVERY_DEDUP_MS = 30_000;
 
 function isMissing(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
@@ -57,11 +60,16 @@ async function recoverOnce(
   root: string,
 ): Promise<ReapReport | undefined> {
   if (options.reap === false) return undefined;
-  if (recoveredRoots.has(root)) {
+  const lastRecovery = recoveredRoots.get(root);
+  if (
+    lastRecovery !== undefined &&
+    Date.now() - lastRecovery < RECOVERY_DEDUP_MS
+  ) {
     recoveredRoots.delete(root);
-    recoveredRoots.set(root, true);
+    recoveredRoots.set(root, lastRecovery);
     return undefined;
   }
+  recoveredRoots.delete(root);
   const configured = typeof options.reap === "object" ? options.reap : {};
   const reapOptions: ReapTempLeasesOptions = {
     ...configured,
@@ -80,8 +88,13 @@ async function recoverOnce(
   }
   try {
     const report = await recovery;
-    if (!options.signal?.aborted) {
-      recoveredRoots.set(root, true);
+    if (
+      !options.signal?.aborted &&
+      !report.truncated &&
+      report.progressed.length === 0 &&
+      report.errors.length === 0
+    ) {
+      recoveredRoots.set(root, Date.now());
       if (recoveredRoots.size > MAX_RECOVERED_ROOTS) {
         const oldest = recoveredRoots.keys().next().value;
         if (oldest !== undefined) recoveredRoots.delete(oldest);
@@ -144,49 +157,55 @@ class TempLeaseHandle implements TempLease {
         return { path: this.#path, status: "identity-changed" };
       }
 
+      const originalPath = this.#path;
       const claimed = join(
         this.root,
         reapingName(process.pid, this.ownerNamespace, this.generation),
       );
       try {
-        await rename(this.#path, claimed);
+        await rename(originalPath, claimed);
       } catch (error) {
         if (isMissing(error)) {
           this.#state = "disposed";
-          return { path: this.#path, status: "already-absent" };
+          return { path: originalPath, status: "already-absent" };
         }
         throw error;
       }
+      this.#path = claimed;
       const claimedIdentity = await directoryIdentity(claimed);
       if (
         claimedIdentity === undefined ||
         !sameIdentity(this.identity, claimedIdentity)
       ) {
         if (claimedIdentity === undefined) {
+          this.#path = originalPath;
           this.#state = "disposed";
-          return { path: this.#path, status: "already-absent" };
+          return { path: originalPath, status: "already-absent" };
         }
         const preservedPath = join(dirname(this.root), keptName());
         await rename(claimed, preservedPath);
-        this.#state = "active";
+        this.#path = preservedPath;
+        this.#state = "kept";
         return {
-          path: this.#path,
+          path: originalPath,
           status: "identity-changed",
           preservedPath,
         };
       }
       try {
-        await rm(claimed, { recursive: true, force: true });
+        await removeRecursively(claimed);
       } catch (error) {
         try {
-          await rename(claimed, this.#path);
+          await rename(claimed, originalPath);
+          this.#path = originalPath;
         } catch {
           this.#path = claimed;
         }
         throw error;
       }
+      this.#path = originalPath;
       this.#state = "disposed";
-      return { path: this.#path, status: "removed" };
+      return { path: originalPath, status: "removed" };
     } catch (error) {
       this.#state = "active";
       throw error;

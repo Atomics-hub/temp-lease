@@ -18,8 +18,9 @@ We aim to acknowledge reports within 72 hours. Confirmed issues will receive a c
 - On Unix, both package and namespace roots must be owned by the current uid with `0700` permissions. Symlink roots are rejected.
 - Linux recovery requires the recorded and current PID-namespace fingerprints to match.
 - An owner is dead only when the OS liveness probe returns `ESRCH`. `EPERM` and every other error are unknown and fail closed.
-- Recursive measurement and removal use `lstat`; symlinks inside a workspace are removed as links and are not traversed.
+- Bounded removal uses `lstat`; symlinks inside a workspace are removed as links and are not traversed.
 - Normal disposal compares the directory's device, inode, and birth-time receipt before claiming it.
+- Incomplete removal is atomically moved to an ownerless queue name. A later bounded pass reclaims it without trusting the original PID again.
 
 A hostile process with the same OS account can inspect memory, replace filesystem objects, signal peer processes, and manufacture names. Preventing that requires separate OS users, containers, or another isolation boundary and is intentionally outside this package's claims.
 
@@ -27,6 +28,6 @@ A hostile process with the same OS account can inspect memory, replace filesyste
 
 - Give unrelated applications distinct namespaces.
 - Do not place untrusted manually named directories inside a temp-lease root.
-- Inspect `errors`, `skipped`, and `truncated` in explicit recovery reports.
+- Inspect `errors`, `progressed`, `skipped`, and `truncated` in explicit recovery reports.
 - Raise budgets only for roots whose storage growth you understand.
 - Call `keep()` before a detached child or external process takes responsibility for the workspace.

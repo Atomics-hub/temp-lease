@@ -5,6 +5,7 @@ import {
   generationToken,
   leaseName,
   parseOwnedName,
+  queuedName,
   reapingName,
 } from "../../src/names.js";
 
@@ -42,6 +43,17 @@ describe("owned names", () => {
     });
   });
 
+  it("round-trips ownerless queued names", () => {
+    const generation = generationToken();
+    const parsed = parseOwnedName(queuedName(42, "host", generation));
+    assert.deepEqual(parsed, {
+      kind: "queued",
+      ownerPid: 42,
+      namespace: "host",
+      generation,
+    });
+  });
+
   it("rejects arbitrary and nearly-valid names", () => {
     const invalid = [
       "",
@@ -51,6 +63,7 @@ describe("owned names", () => {
       "lease-v1-p1-nHOST-g" + "a".repeat(32),
       "lease-v2-p1-nhost-g" + "a".repeat(32),
       ".reaping-v1-p1-nhost-o0-g" + "a".repeat(32) + "-c" + "b".repeat(32),
+      ".queued-v1-nhost-o0-g" + "a".repeat(32) + "-q" + "b".repeat(32),
       "kept-v1-g" + "a".repeat(32),
     ];
     for (const name of invalid) assert.equal(parseOwnedName(name), undefined);
@@ -61,7 +74,7 @@ describe("owned names", () => {
       fc.property(fc.string({ maxLength: 300 }), (value) => {
         const parsed = parseOwnedName(value);
         if (parsed) {
-          assert.match(value, /^(?:lease-v1|\.reaping-v1)-/);
+          assert.match(value, /^(?:lease-v1|\.reaping-v1|\.queued-v1)-/);
           assert.equal(value.includes("/"), false);
           assert.equal(value.includes("\\"), false);
         }

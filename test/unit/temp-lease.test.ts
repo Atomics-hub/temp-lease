@@ -10,6 +10,7 @@ import {
   rename,
   rm,
   symlink,
+  truncate,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -246,6 +247,37 @@ describe("tempLease", () => {
     await second.dispose();
   });
 
+  it("continues incomplete automatic recovery instead of caching it", async () => {
+    const baseDirectory = await base();
+    const namespace = uniqueNamespace("automatic-resume");
+    const orphan = await deadWorkspace(baseDirectory, namespace);
+    for (let index = 0; index < 24; index += 1) {
+      await writeFile(join(orphan, `artifact-${index}`), String(index));
+    }
+
+    let lease = await tempLease({
+      baseDirectory,
+      namespace,
+      reap: { maxTreeEntries: 6, maxReaps: 1, maxDurationMs: 10_000 },
+    });
+    assert.equal(lease.recovery?.progressed.length, 1);
+    await lease.dispose();
+
+    let completed = false;
+    for (let pass = 0; pass < 10 && !completed; pass += 1) {
+      lease = await tempLease({
+        baseDirectory,
+        namespace,
+        reap: { maxTreeEntries: 6, maxReaps: 1, maxDurationMs: 10_000 },
+      });
+      completed = (lease.recovery?.reaped.length ?? 0) === 1;
+      await lease.dispose();
+    }
+
+    assert.equal(completed, true);
+    await assert.rejects(lstat(orphan), { code: "ENOENT" });
+  });
+
   it("rejects invalid namespaces and pre-aborted creation", async () => {
     const baseDirectory = await base();
     await assert.rejects(
@@ -433,15 +465,19 @@ describe("reapTempLeases", () => {
       baseDirectory,
       namespace,
       maxBytes: 1,
+      maxReaps: 1,
     });
-    assert.equal(byteReport.skipped[0]?.reason, "byte-budget");
+    assert.equal(byteReport.progressed[0]?.reason, "byte-budget");
+    assert.equal(byteReport.truncated, true);
 
     const treeReport = await reapTempLeases({
       baseDirectory,
       namespace,
       maxTreeEntries: 1,
+      maxReaps: 1,
     });
-    assert.equal(treeReport.skipped[0]?.reason, "entry-budget");
+    assert.equal(treeReport.progressed[0]?.reason, "entry-budget");
+    assert.equal(treeReport.truncated, true);
 
     const second = await deadWorkspace(
       baseDirectory,
@@ -486,6 +522,62 @@ describe("reapTempLeases", () => {
     void second;
   });
 
+  it("reclaims a large tree over bounded resumable chunks", async () => {
+    const baseDirectory = await base();
+    const namespace = uniqueNamespace("chunks");
+    const orphan = await deadWorkspace(baseDirectory, namespace);
+    for (let index = 0; index < 31; index += 1) {
+      await writeFile(join(orphan, `artifact-${index}`), "payload");
+    }
+
+    const first = await reapTempLeases({
+      baseDirectory,
+      namespace,
+      maxTreeEntries: 7,
+      maxReaps: 1,
+      maxDurationMs: 10_000,
+    });
+    assert.equal(first.progressed.length, 1);
+    assert.equal(first.progressed[0]?.reason, "entry-budget");
+    assert.match(first.progressed[0]?.queuedName ?? "", /^\.queued-v1-/);
+
+    let finalKind: string | undefined;
+    for (let pass = 0; pass < 10 && finalKind === undefined; pass += 1) {
+      const report = await reapTempLeases({
+        baseDirectory,
+        namespace,
+        maxTreeEntries: 7,
+        maxReaps: 1,
+        maxDurationMs: 10_000,
+      });
+      finalKind = report.reaped[0]?.kind;
+    }
+
+    assert.equal(finalKind, "continued-reap");
+    const protocolEntries = (await readdir(dirname(orphan))).filter((name) =>
+      /^(?:lease-v1|\.reaping-v1|\.queued-v1)-/.test(name),
+    );
+    assert.deepEqual(protocolEntries, []);
+  });
+
+  it("removes a sparse workspace larger than the former default byte ceiling", async () => {
+    const baseDirectory = await base();
+    const namespace = uniqueNamespace("large-sparse");
+    const orphan = await deadWorkspace(baseDirectory, namespace);
+    const sparseFile = join(orphan, "large-sparse-file");
+    await writeFile(sparseFile, "");
+    await truncate(sparseFile, 11 * 1024 ** 3);
+
+    const report = await reapTempLeases({
+      baseDirectory,
+      namespace,
+      maxDurationMs: 10_000,
+    });
+    assert.equal(report.reaped.length, 1);
+    assert.equal(report.errors.length, 0);
+    await assert.rejects(lstat(orphan), { code: "ENOENT" });
+  });
+
   it("validates all budget values", async () => {
     const baseDirectory = await base();
     const namespace = uniqueNamespace();
@@ -497,6 +589,14 @@ describe("reapTempLeases", () => {
     }
     await assert.rejects(
       reapTempLeases({ baseDirectory, namespace, maxConcurrency: 0 }),
+      RangeError,
+    );
+    await assert.rejects(
+      reapTempLeases({ baseDirectory, namespace, maxRetries: -1 }),
+      RangeError,
+    );
+    await assert.rejects(
+      reapTempLeases({ baseDirectory, namespace, retryDelayMs: 0.5 }),
       RangeError,
     );
   });

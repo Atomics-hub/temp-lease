@@ -61,7 +61,7 @@ try {
   );
   const errors = reports.flatMap((report) => report.errors);
   const leftovers = (await readdir(root)).filter((name) =>
-    /^(?:lease-v1|\.reaping-v1)-/.test(name),
+    /^(?:lease-v1|\.reaping-v1|\.queued-v1)-/.test(name),
   );
 
   assert.equal(removed, 500);

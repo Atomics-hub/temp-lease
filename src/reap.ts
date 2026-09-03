@@ -1,8 +1,9 @@
 import type { Dirent } from "node:fs";
-import { lstat, opendir, rename, rm } from "node:fs/promises";
+import { opendir, rename } from "node:fs/promises";
 import { join } from "node:path";
-import { parseOwnedName, reapingName } from "./names.js";
+import { parseOwnedName, queuedName, reapingName } from "./names.js";
 import { ownerState, processNamespace } from "./platform.js";
+import { removeIncrementally, retryOperation } from "./remove.js";
 import { ensureTempLeaseRoot } from "./root.js";
 import type {
   ReapError,
@@ -11,8 +12,6 @@ import type {
   ReapTempLeasesOptions,
 } from "./types.js";
 
-const GIB = 1024 ** 3;
-
 interface Budgets {
   maxEntries: number;
   maxReaps: number;
@@ -20,13 +19,8 @@ interface Budgets {
   maxBytes: number;
   maxTreeEntries: number;
   maxDurationMs: number;
-}
-
-interface Measurement {
-  bytes: number;
-  entries: number;
-  exceededEntries: boolean;
-  timedOut: boolean;
+  maxRetries: number;
+  retryDelayMs: number;
 }
 
 function finiteBudget(
@@ -46,13 +40,19 @@ function budgets(options: ReapTempLeasesOptions): Budgets {
     maxEntries: finiteBudget(options.maxEntries, 1_000, "maxEntries"),
     maxReaps: finiteBudget(options.maxReaps, 100, "maxReaps"),
     maxConcurrency: finiteBudget(options.maxConcurrency, 4, "maxConcurrency"),
-    maxBytes: finiteBudget(options.maxBytes, 10 * GIB, "maxBytes"),
+    maxBytes: finiteBudget(
+      options.maxBytes,
+      Number.MAX_SAFE_INTEGER,
+      "maxBytes",
+    ),
     maxTreeEntries: finiteBudget(
       options.maxTreeEntries,
       100_000,
       "maxTreeEntries",
     ),
     maxDurationMs: finiteBudget(options.maxDurationMs, 2_000, "maxDurationMs"),
+    maxRetries: finiteBudget(options.maxRetries, 3, "maxRetries"),
+    retryDelayMs: finiteBudget(options.retryDelayMs, 100, "retryDelayMs"),
   };
 }
 
@@ -78,45 +78,6 @@ function receiptError(
   };
 }
 
-async function measureTree(
-  root: string,
-  maxEntries: number,
-  deadline: number,
-): Promise<Measurement> {
-  const pending = [root];
-  let bytes = 0;
-  let entries = 0;
-
-  while (pending.length > 0) {
-    if (Date.now() >= deadline) {
-      return { bytes, entries, exceededEntries: false, timedOut: true };
-    }
-    const path = pending.pop()!;
-    const stats = await lstat(path);
-    entries += 1;
-    bytes += stats.size;
-    if (entries > maxEntries) {
-      return { bytes, entries, exceededEntries: true, timedOut: false };
-    }
-    if (!stats.isDirectory() || stats.isSymbolicLink()) continue;
-    const directory = await opendir(path);
-    try {
-      for await (const entry of directory) {
-        if (Date.now() >= deadline) {
-          return { bytes, entries, exceededEntries: false, timedOut: true };
-        }
-        if (entries + pending.length >= maxEntries) {
-          return { bytes, entries, exceededEntries: true, timedOut: false };
-        }
-        pending.push(join(path, entry.name));
-      }
-    } finally {
-      await directory.close().catch(() => undefined);
-    }
-  }
-  return { bytes, entries, exceededEntries: false, timedOut: false };
-}
-
 function skip(report: ReapReport, name: string, reason: ReapSkipReason): void {
   report.skipped.push({ name, reason });
 }
@@ -125,6 +86,10 @@ export async function reapTempLeases(
   options: ReapTempLeasesOptions = {},
 ): Promise<ReapReport> {
   const limit = budgets(options);
+  if (limit.maxConcurrency === 0) {
+    throw new RangeError("maxConcurrency must be greater than zero");
+  }
+
   const started = new Date();
   const deadline = Date.now() + limit.maxDurationMs;
   const root = await ensureTempLeaseRoot(options);
@@ -134,19 +99,44 @@ export async function reapTempLeases(
     startedAt: started.toISOString(),
     finishedAt: started.toISOString(),
     scanned: 0,
-    measuredBytes: 0,
+    removedBytes: 0,
     reaped: [],
+    progressed: [],
     skipped: [],
     errors: [],
     truncated: false,
   };
 
-  if (limit.maxConcurrency === 0) {
-    throw new RangeError("maxConcurrency must be greater than zero");
-  }
-
-  let reservedBytes = 0;
+  let remainingBytes = limit.maxBytes;
   let reservedReaps = 0;
+
+  const releaseClaim = async (
+    entryName: string,
+    claimed: string,
+    source: string,
+    destination: string,
+  ): Promise<boolean> => {
+    try {
+      await retryOperation(
+        () => rename(claimed, destination),
+        limit.maxRetries,
+        limit.retryDelayMs,
+      );
+      return true;
+    } catch (error) {
+      report.errors.push(receiptError(entryName, "queue", error));
+      try {
+        await retryOperation(
+          () => rename(claimed, source),
+          limit.maxRetries,
+          limit.retryDelayMs,
+        );
+      } catch (rollbackError) {
+        report.errors.push(receiptError(entryName, "queue", rollbackError));
+      }
+      return false;
+    }
+  };
 
   const processEntry = async (entry: Dirent): Promise<void> => {
     if (options.signal?.aborted) {
@@ -178,52 +168,28 @@ export async function reapTempLeases(
       return;
     }
 
-    const responsiblePid =
-      parsed.kind === "lease" ? parsed.ownerPid : parsed.reaperPid;
-    const state = ownerState(responsiblePid);
-    if (state === "alive") {
-      skip(report, entry.name, "live-owner");
-      return;
-    }
-    if (state === "unknown") {
-      skip(report, entry.name, "unknown-owner");
-      return;
+    if (parsed.kind !== "queued") {
+      const responsiblePid =
+        parsed.kind === "lease" ? parsed.ownerPid : parsed.reaperPid;
+      const state = ownerState(responsiblePid);
+      if (state === "alive") {
+        skip(report, entry.name, "live-owner");
+        return;
+      }
+      if (state === "unknown") {
+        skip(report, entry.name, "unknown-owner");
+        return;
+      }
     }
 
-    const source = join(root, entry.name);
-    let measurement: Measurement;
-    try {
-      measurement = await measureTree(source, limit.maxTreeEntries, deadline);
-    } catch (error) {
-      if (["ENOENT", "ENOTDIR"].includes(errorCode(error) ?? "")) {
-        skip(report, entry.name, "race-lost");
-      } else {
-        report.errors.push(receiptError(entry.name, "measure", error));
-      }
-      return;
-    }
-    report.measuredBytes += measurement.bytes;
-    if (measurement.exceededEntries) {
-      skip(report, entry.name, "entry-budget");
-      return;
-    }
-    if (measurement.timedOut) {
-      skip(report, entry.name, "time-budget");
-      report.truncated = true;
-      return;
-    }
     if (reservedReaps >= limit.maxReaps) {
       skip(report, entry.name, "entry-budget");
       report.truncated = true;
       return;
     }
-    if (measurement.bytes > limit.maxBytes - reservedBytes) {
-      skip(report, entry.name, "byte-budget");
-      return;
-    }
     reservedReaps += 1;
-    reservedBytes += measurement.bytes;
 
+    const source = join(root, entry.name);
     const claimedName = reapingName(
       parsed.ownerPid,
       namespace,
@@ -231,9 +197,13 @@ export async function reapTempLeases(
     );
     const claimed = join(root, claimedName);
     try {
-      await rename(source, claimed);
+      await retryOperation(
+        () => rename(source, claimed),
+        limit.maxRetries,
+        limit.retryDelayMs,
+      );
     } catch (error) {
-      if (errorCode(error) === "ENOENT") {
+      if (["ENOENT", "ENOTDIR"].includes(errorCode(error) ?? "")) {
         skip(report, entry.name, "race-lost");
       } else {
         report.errors.push(receiptError(entry.name, "claim", error));
@@ -241,16 +211,68 @@ export async function reapTempLeases(
       return;
     }
 
+    let removal;
     try {
-      await rm(claimed, { recursive: true, force: true });
-      report.reaped.push({
-        name: entry.name,
-        kind: parsed.kind === "lease" ? "lease" : "abandoned-reap",
-        bytes: measurement.bytes,
+      removal = await removeIncrementally(claimed, {
+        maxEntries: limit.maxTreeEntries,
+        deadline,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
+        maxRetries: limit.maxRetries,
+        retryDelayMs: limit.retryDelayMs,
+        reserveBytes(bytes) {
+          if (bytes > remainingBytes) return false;
+          remainingBytes -= bytes;
+          return true;
+        },
       });
     } catch (error) {
       report.errors.push(receiptError(entry.name, "remove", error));
-      await rename(claimed, source).catch(() => undefined);
+      report.truncated = true;
+      const queued = join(
+        root,
+        queuedName(parsed.ownerPid, namespace, parsed.generation),
+      );
+      await releaseClaim(entry.name, claimed, source, queued);
+      return;
+    }
+
+    report.removedBytes += removal.removedBytes;
+    if (removal.complete) {
+      report.reaped.push({
+        name: entry.name,
+        kind:
+          parsed.kind === "lease"
+            ? "lease"
+            : parsed.kind === "reaping"
+              ? "abandoned-reap"
+              : "continued-reap",
+        bytes: removal.removedBytes,
+        entries: removal.visitedEntries,
+      });
+      return;
+    }
+
+    const nextQueuedName = queuedName(
+      parsed.ownerPid,
+      namespace,
+      parsed.generation,
+    );
+    report.truncated = true;
+    if (
+      await releaseClaim(
+        entry.name,
+        claimed,
+        source,
+        join(root, nextQueuedName),
+      )
+    ) {
+      report.progressed.push({
+        name: entry.name,
+        queuedName: nextQueuedName,
+        reason: removal.reason!,
+        bytes: removal.removedBytes,
+        entries: removal.visitedEntries,
+      });
     }
   };
 

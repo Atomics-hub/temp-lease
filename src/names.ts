@@ -9,6 +9,9 @@ const leasePattern = new RegExp(
 const reapingPattern = new RegExp(
   `^\\.reaping-v1-p(\\d+)-n(${token})-o(\\d+)-g(${generation})-c(${generation})$`,
 );
+const queuedPattern = new RegExp(
+  `^\\.queued-v1-n(${token})-o(\\d+)-g(${generation})-q(${generation})$`,
+);
 
 export interface LeaseName {
   kind: "lease";
@@ -25,7 +28,14 @@ export interface ReapingName {
   generation: string;
 }
 
-export type OwnedName = LeaseName | ReapingName;
+export interface QueuedName {
+  kind: "queued";
+  ownerPid: number;
+  namespace: string;
+  generation: string;
+}
+
+export type OwnedName = LeaseName | ReapingName | QueuedName;
 
 function validPid(value: string): number | undefined {
   const pid = Number(value);
@@ -56,6 +66,14 @@ export function keptName(): string {
   return `kept-v1-g${generationToken()}`;
 }
 
+export function queuedName(
+  ownerPid: number,
+  namespace: string,
+  generation: string,
+): string {
+  return `.queued-v1-n${namespace}-o${ownerPid}-g${generation}-q${generationToken()}`;
+}
+
 export function parseOwnedName(name: string): OwnedName | undefined {
   const lease = leasePattern.exec(name);
   if (lease) {
@@ -70,15 +88,27 @@ export function parseOwnedName(name: string): OwnedName | undefined {
   }
 
   const reaping = reapingPattern.exec(name);
-  if (!reaping) return undefined;
-  const reaperPid = validPid(reaping[1]!);
-  const ownerPid = validPid(reaping[3]!);
-  if (reaperPid === undefined || ownerPid === undefined) return undefined;
+  if (reaping) {
+    const reaperPid = validPid(reaping[1]!);
+    const ownerPid = validPid(reaping[3]!);
+    if (reaperPid === undefined || ownerPid === undefined) return undefined;
+    return {
+      kind: "reaping",
+      reaperPid,
+      namespace: reaping[2]!,
+      ownerPid,
+      generation: reaping[4]!,
+    };
+  }
+
+  const queued = queuedPattern.exec(name);
+  if (!queued) return undefined;
+  const ownerPid = validPid(queued[2]!);
+  if (ownerPid === undefined) return undefined;
   return {
-    kind: "reaping",
-    reaperPid,
-    namespace: reaping[2]!,
+    kind: "queued",
+    namespace: queued[1]!,
     ownerPid,
-    generation: reaping[4]!,
+    generation: queued[3]!,
   };
 }
