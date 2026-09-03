@@ -18,12 +18,12 @@ The live dependency audit reported zero known vulnerabilities.
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Formatting and static lint   | Pass, zero warnings                                                                                           |
 | Strict TypeScript            | Pass                                                                                                          |
-| Behavioral tests             | 32 pass, 0 fail                                                                                               |
-| Instrumented source coverage | 89.64% statements/lines, 81.67% branches, 96.49% functions                                                    |
+| Behavioral tests             | 33 pass, 0 fail                                                                                               |
+| Instrumented source coverage | 89.73% statements/lines, 81.56% branches, 96.49% functions                                                    |
 | Name-parser fuzzing          | 10,000 unconstrained strings plus valid-name properties                                                       |
 | Process-death recovery       | Real child process terminated with `SIGKILL`; orphan reaped                                                   |
 | Reaper crash recovery        | Abandoned atomic claim recovered after its claimant died                                                      |
-| Concurrency unit test        | 16 simultaneous reapers; exactly one claim                                                                    |
+| Concurrency unit test        | 16 simultaneous reapers; exactly one successful root-removal receipt                                          |
 | Stress test                  | 1,000 create/dispose cycles; 500 orphans; 32 reapers; zero leaks/errors                                       |
 | Filesystem safety            | Live-owner refusal, replacement preservation, root symlink/mode refusal, internal symlink target preservation |
 | Recovery budgets             | Root entries, tree entries, reaps, concurrency, bytes, time, and abort                                        |
@@ -31,12 +31,12 @@ The live dependency audit reported zero known vulnerabilities.
 | Transient filesystem errors  | Bounded retries, permanent-error refusal, and retry exhaustion covered                                        |
 | Supported Node lines         | Node 20.20, 22.23, 24.20, and 26.8 ESM/CommonJS smoke pass                                                    |
 | Type packaging               | Are The Types Wrong: all green; Publint: all good                                                             |
-| Bundle budget                | ESM 5,920 bytes gzip; CommonJS 6,356 bytes gzip                                                               |
+| Bundle budget                | ESM 5,962 bytes gzip; CommonJS 6,400 bytes gzip                                                               |
 | Packed consumer              | Isolated ESM, CommonJS, and TypeScript consumers pass                                                         |
 | Runtime dependencies         | None                                                                                                          |
 | npm security audit           | Zero known vulnerabilities                                                                                    |
 
-The audited artifact contains 12 allowlisted files and is about 38.8 kB compressed. Exact hashes and byte counts change with documentation or source-map updates.
+The audited artifact contains 12 allowlisted files and is about 39.2 kB compressed. Exact hashes and byte counts change with documentation or source-map updates.
 
 ## Safety cases covered
 
@@ -45,7 +45,7 @@ The audited artifact contains 12 allowlisted files and is about 38.8 kB compress
 - live-owner refusal and dead-owner reclaim;
 - namespace mismatch and unknown-namespace refusal;
 - malformed, foreign, and non-directory refusal;
-- atomic rename-before-remove with one winner under concurrency;
+- rename-before-remove with exactly one successful root-removal receipt under concurrency;
 - interrupted-reaper recovery;
 - ownerless queue continuation after entry, byte, or abort limits;
 - in-flight bounded chunks finish after the pass deadline, guaranteeing progress;

@@ -614,6 +614,7 @@ describe("reapTempLeases", () => {
         async removeIncrementally() {
           return {
             complete: false,
+            removedRoot: false,
             reason: "entry-budget",
             removedBytes: 0,
             visitedEntries: 1,
@@ -634,6 +635,33 @@ describe("reapTempLeases", () => {
       ),
       false,
     );
+  });
+
+  it("reports a vanished claimed root as a lost race", async () => {
+    const baseDirectory = await base();
+    const namespace = uniqueNamespace("vanished-claim");
+    const orphan = await deadWorkspace(baseDirectory, namespace);
+
+    const report = await reapTempLeasesWithRuntime(
+      { baseDirectory, namespace },
+      {
+        rename,
+        async removeIncrementally(path) {
+          await rm(path, { recursive: true, force: true });
+          return {
+            complete: true,
+            removedRoot: false,
+            removedBytes: 0,
+            visitedEntries: 0,
+          };
+        },
+      },
+    );
+
+    assert.deepEqual(report.reaped, []);
+    assert.deepEqual(report.skipped, [
+      { name: basename(orphan), reason: "race-lost" },
+    ]);
   });
 
   it("removes a sparse workspace larger than the former default byte ceiling", async () => {

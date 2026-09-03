@@ -64,6 +64,7 @@ export interface IncrementalRemovalOptions {
 
 export interface IncrementalRemovalResult {
   complete: boolean;
+  removedRoot: boolean;
   reason?: RemovalStopReason;
   removedBytes: number;
   visitedEntries: number;
@@ -93,11 +94,13 @@ export async function removeIncrementally(
 ): Promise<IncrementalRemovalResult> {
   const stack: PathFrame[] = [{ path: root, expanded: false }];
   let scheduledPaths = 1;
+  let removedRoot = false;
   let removedBytes = 0;
   let visitedEntries = 0;
 
   const incomplete = (reason: RemovalStopReason): IncrementalRemovalResult => ({
     complete: false,
+    removedRoot,
     reason,
     removedBytes,
     visitedEntries,
@@ -116,6 +119,7 @@ export async function removeIncrementally(
           options.maxRetries,
           options.retryDelayMs,
         );
+        if (frame.path === root) removedRoot = true;
       } catch (error) {
         if (errorCode(error) === "ENOENT") continue;
         if (errorCode(error) === "ENOTEMPTY") {
@@ -176,8 +180,9 @@ export async function removeIncrementally(
       options.maxRetries,
       options.retryDelayMs,
     );
+    if (frame.path === root) removedRoot = true;
     removedBytes += stats.size;
   }
 
-  return { complete: true, removedBytes, visitedEntries };
+  return { complete: true, removedRoot, removedBytes, visitedEntries };
 }

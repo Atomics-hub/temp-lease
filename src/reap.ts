@@ -251,6 +251,10 @@ export async function reapTempLeasesWithRuntime(
 
     report.removedBytes += removal.removedBytes;
     if (removal.complete) {
+      if (!removal.removedRoot) {
+        skip(report, entry.name, "race-lost");
+        return;
+      }
       report.reaped.push({
         name: entry.name,
         kind:

@@ -125,7 +125,7 @@ Returns the deterministic root path without creating it. This is useful for diag
 2. Its name contains the owner PID, current PID-namespace fingerprint on Linux, and 128 bits of randomness before the path is returned.
 3. Recovery accepts only that exact name grammar and only real directories.
 4. `process.kill(pid, 0)` checks liveness. `EPERM`, an unreadable namespace, and any ambiguous result fail closed.
-5. A dead-owner directory is renamed within the same root before deletion. That atomic claim prevents two reapers from owning it.
+5. A dead-owner directory is renamed within the same root before deletion. Only the worker that removes the claimed root reports it as reaped; concurrent losers report `race-lost`.
 6. Bounded removal uses `lstat` and never follows symlinks. If a chunk reaches a budget, the remainder is atomically renamed to an ownerless `.queued-v1-*` entry for the next pass.
 7. A claim records the reaper PID. If that process dies before queueing or completing deletion, a later process can recover the abandoned claim.
 

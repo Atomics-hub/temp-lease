@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented here.
 
-## 0.1.0 - Unreleased
+## 0.1.0 - 2026-09-02
 
 - Add private per-user and per-namespace temporary workspace roots.
 - Add explicit, identity-preserving disposal and `Symbol.asyncDispose` support.
@@ -15,4 +15,5 @@ All notable changes to this project will be documented here.
 - Retry incomplete automatic recovery instead of caching partial passes.
 - Preserve the claimed handle path when a post-rename inspection fails.
 - Guarantee forward progress when a claimed chunk crosses the pass deadline.
+- Report only the successful root remover as the winner of a Windows rename race.
 - Ship ESM, CommonJS, and TypeScript declarations with no runtime dependencies.
