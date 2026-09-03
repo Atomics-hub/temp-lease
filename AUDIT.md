@@ -18,7 +18,7 @@ The live dependency audit reported zero known vulnerabilities.
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Formatting and static lint   | Pass, zero warnings                                                                                           |
 | Strict TypeScript            | Pass                                                                                                          |
-| Behavioral tests             | 31 pass, 0 fail                                                                                               |
+| Behavioral tests             | 32 pass, 0 fail                                                                                               |
 | Instrumented source coverage | 89.64% statements/lines, 81.67% branches, 96.49% functions                                                    |
 | Name-parser fuzzing          | 10,000 unconstrained strings plus valid-name properties                                                       |
 | Process-death recovery       | Real child process terminated with `SIGKILL`; orphan reaped                                                   |

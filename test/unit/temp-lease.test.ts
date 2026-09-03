@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   getTempLeaseRoot,
   reapTempLeases,
@@ -25,6 +26,7 @@ import {
 } from "../../src/index.js";
 import { reapTempLeasesWithRuntime } from "../../src/reap.js";
 import { removeIncrementally } from "../../src/remove.js";
+import { ownerState } from "../../src/platform.js";
 
 const cleanup = new Set<string>();
 let cachedDeadPid: Promise<number> | undefined;
@@ -92,7 +94,7 @@ function spawnLeaseChild(
     [
       "--import",
       "tsx",
-      new URL("../fixtures/lease-child.ts", import.meta.url).pathname,
+      fileURLToPath(new URL("../fixtures/lease-child.ts", import.meta.url)),
       baseDirectory,
       namespace,
       mode,
@@ -344,6 +346,10 @@ describe("tempLease", () => {
 });
 
 describe("reapTempLeases", () => {
+  it("recognizes the current process as a live owner", () => {
+    assert.equal(ownerState(process.pid), "alive");
+  });
+
   it("reaps a workspace after its owner is killed", async () => {
     const baseDirectory = await base();
     const namespace = uniqueNamespace("sigkill");
@@ -382,10 +388,8 @@ describe("reapTempLeases", () => {
         reapTempLeases({ baseDirectory, namespace }),
       ),
     );
-    assert.equal(
-      reports.reduce((sum, report) => sum + report.reaped.length, 0),
-      1,
-    );
+    const reaped = reports.flatMap((report) => report.reaped);
+    assert.equal(reaped.length, 1, JSON.stringify(reaped));
     await assert.rejects(lstat(path), { code: "ENOENT" });
   });
 
