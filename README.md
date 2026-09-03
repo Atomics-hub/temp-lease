@@ -110,10 +110,10 @@ Defaults per pass:
 - remove at most 4 chunks concurrently;
 - remove at most `Number.MAX_SAFE_INTEGER` logical file bytes;
 - visit at most 100,000 entries in each chunk;
-- stop recovery work after 2 seconds;
+- stop claiming new chunks after 2 seconds;
 - retry transient filesystem failures 3 times with a 100 ms linear delay.
 
-When a byte, tree-entry, time, or abort limit stops a chunk, its partially cleaned workspace is atomically renamed to an ownerless queue entry. A later pass resumes it. This makes the defaults protective without turning a large workspace into a permanent leak. A custom `maxBytes` smaller than one remaining file cannot make progress until raised.
+When a byte, tree-entry, or abort limit stops a chunk, its partially cleaned workspace is atomically renamed to an ownerless queue entry. A later pass resumes it. Once claimed, a bounded chunk may finish after the time deadline so repeated short passes cannot livelock during directory enumeration. This makes the defaults protective without turning a large workspace into a permanent leak. A custom `maxBytes` smaller than one remaining file—or a `maxTreeEntries` limit too small to reach any leaf—cannot make progress until raised.
 
 ### `getTempLeaseRoot(options?)`
 

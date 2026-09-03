@@ -18,8 +18,8 @@ The live dependency audit reported zero known vulnerabilities.
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Formatting and static lint   | Pass, zero warnings                                                                                           |
 | Strict TypeScript            | Pass                                                                                                          |
-| Behavioral tests             | 29 pass, 0 fail                                                                                               |
-| Instrumented source coverage | 87.40% statements/lines, 81.63% branches, 94.64% functions                                                    |
+| Behavioral tests             | 31 pass, 0 fail                                                                                               |
+| Instrumented source coverage | 89.64% statements/lines, 81.67% branches, 96.49% functions                                                    |
 | Name-parser fuzzing          | 10,000 unconstrained strings plus valid-name properties                                                       |
 | Process-death recovery       | Real child process terminated with `SIGKILL`; orphan reaped                                                   |
 | Reaper crash recovery        | Abandoned atomic claim recovered after its claimant died                                                      |
@@ -31,12 +31,12 @@ The live dependency audit reported zero known vulnerabilities.
 | Transient filesystem errors  | Bounded retries, permanent-error refusal, and retry exhaustion covered                                        |
 | Supported Node lines         | Node 20.20, 22.23, 24.20, and 26.8 ESM/CommonJS smoke pass                                                    |
 | Type packaging               | Are The Types Wrong: all green; Publint: all good                                                             |
-| Bundle budget                | ESM 5,888 bytes gzip; CommonJS 6,326 bytes gzip                                                               |
+| Bundle budget                | ESM 5,920 bytes gzip; CommonJS 6,356 bytes gzip                                                               |
 | Packed consumer              | Isolated ESM, CommonJS, and TypeScript consumers pass                                                         |
 | Runtime dependencies         | None                                                                                                          |
 | npm security audit           | Zero known vulnerabilities                                                                                    |
 
-The audited artifact contains 12 allowlisted files and is about 38.3 kB compressed. Exact hashes and byte counts change with documentation or source-map updates.
+The audited artifact contains 12 allowlisted files and is about 38.8 kB compressed. Exact hashes and byte counts change with documentation or source-map updates.
 
 ## Safety cases covered
 
@@ -47,7 +47,9 @@ The audited artifact contains 12 allowlisted files and is about 38.3 kB compress
 - malformed, foreign, and non-directory refusal;
 - atomic rename-before-remove with one winner under concurrency;
 - interrupted-reaper recovery;
-- ownerless queue continuation after entry, byte, time, or abort limits;
+- ownerless queue continuation after entry, byte, or abort limits;
+- in-flight bounded chunks finish after the pass deadline, guaranteeing progress;
+- queue-transition failure rolls a claim back to a reclaimable name;
 - incomplete automatic passes remain eligible for immediate continuation;
 - identity receipt preservation of a same-name replacement;
 - idempotent disposal and explicit keep semantics;

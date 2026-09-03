@@ -52,12 +52,10 @@ export async function removeRecursively(path: string): Promise<void> {
   });
 }
 
-export type RemovalStopReason =
-  "aborted" | "byte-budget" | "entry-budget" | "time-budget";
+export type RemovalStopReason = "aborted" | "byte-budget" | "entry-budget";
 
 export interface IncrementalRemovalOptions {
   maxEntries: number;
-  deadline: number;
   signal?: AbortSignal;
   maxRetries: number;
   retryDelayMs: number;
@@ -81,7 +79,6 @@ function stopped(
   options: IncrementalRemovalOptions,
 ): RemovalStopReason | undefined {
   if (options.signal?.aborted) return "aborted";
-  if (Date.now() >= options.deadline) return "time-budget";
   return undefined;
 }
 

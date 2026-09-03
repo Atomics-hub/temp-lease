@@ -16,7 +16,7 @@ export interface ReapBudgets {
   maxBytes?: number;
   /** Maximum entries visited inside any one workspace per chunk. Default: 100,000. */
   maxTreeEntries?: number;
-  /** Stop recovery work after this many milliseconds. Default: 2,000. */
+  /** Stop claiming new chunks after this many milliseconds. Default: 2,000. */
   maxDurationMs?: number;
   /** Retries for transient filesystem operation failures. Default: 3. */
   maxRetries?: number;
@@ -31,7 +31,8 @@ export interface ReapTempLeasesOptions
 
 export interface CreateTempLeaseOptions extends TempLeaseLocationOptions {
   /**
-   * Run one bounded recovery pass per namespace and process. Pass a budget
+   * Run bounded recovery before creation. Complete passes are briefly
+   * deduplicated; incomplete passes remain immediately eligible. Pass a budget
    * object to override defaults, or false to opt out. Default: true.
    */
   reap?: boolean | ReapBudgets;
@@ -60,7 +61,7 @@ export interface ReapedEntry {
 export interface ProgressedEntry {
   name: string;
   queuedName: string;
-  reason: "aborted" | "byte-budget" | "entry-budget" | "time-budget";
+  reason: "aborted" | "byte-budget" | "entry-budget";
   bytes: number;
   entries: number;
 }

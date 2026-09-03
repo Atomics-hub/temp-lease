@@ -23,6 +23,13 @@ interface Budgets {
   retryDelayMs: number;
 }
 
+export interface ReapRuntime {
+  rename(source: string, destination: string): Promise<void>;
+  removeIncrementally: typeof removeIncrementally;
+}
+
+const defaultRuntime: ReapRuntime = { rename, removeIncrementally };
+
 function finiteBudget(
   value: number | undefined,
   fallback: number,
@@ -85,6 +92,13 @@ function skip(report: ReapReport, name: string, reason: ReapSkipReason): void {
 export async function reapTempLeases(
   options: ReapTempLeasesOptions = {},
 ): Promise<ReapReport> {
+  return reapTempLeasesWithRuntime(options, defaultRuntime);
+}
+
+export async function reapTempLeasesWithRuntime(
+  options: ReapTempLeasesOptions,
+  runtime: ReapRuntime,
+): Promise<ReapReport> {
   const limit = budgets(options);
   if (limit.maxConcurrency === 0) {
     throw new RangeError("maxConcurrency must be greater than zero");
@@ -118,7 +132,7 @@ export async function reapTempLeases(
   ): Promise<boolean> => {
     try {
       await retryOperation(
-        () => rename(claimed, destination),
+        () => runtime.rename(claimed, destination),
         limit.maxRetries,
         limit.retryDelayMs,
       );
@@ -127,7 +141,7 @@ export async function reapTempLeases(
       report.errors.push(receiptError(entryName, "queue", error));
       try {
         await retryOperation(
-          () => rename(claimed, source),
+          () => runtime.rename(claimed, source),
           limit.maxRetries,
           limit.retryDelayMs,
         );
@@ -198,7 +212,7 @@ export async function reapTempLeases(
     const claimed = join(root, claimedName);
     try {
       await retryOperation(
-        () => rename(source, claimed),
+        () => runtime.rename(source, claimed),
         limit.maxRetries,
         limit.retryDelayMs,
       );
@@ -213,9 +227,8 @@ export async function reapTempLeases(
 
     let removal;
     try {
-      removal = await removeIncrementally(claimed, {
+      removal = await runtime.removeIncrementally(claimed, {
         maxEntries: limit.maxTreeEntries,
-        deadline,
         ...(options.signal === undefined ? {} : { signal: options.signal }),
         maxRetries: limit.maxRetries,
         retryDelayMs: limit.retryDelayMs,

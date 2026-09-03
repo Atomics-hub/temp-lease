@@ -23,6 +23,8 @@ import {
   TempLeaseRootError,
   TempLeaseStateError,
 } from "../../src/index.js";
+import { reapTempLeasesWithRuntime } from "../../src/reap.js";
+import { removeIncrementally } from "../../src/remove.js";
 
 const cleanup = new Set<string>();
 let cachedDeadPid: Promise<number> | undefined;
@@ -558,6 +560,76 @@ describe("reapTempLeases", () => {
       /^(?:lease-v1|\.reaping-v1|\.queued-v1)-/.test(name),
     );
     assert.deepEqual(protocolEntries, []);
+  });
+
+  it("finishes a claimed chunk after the pass deadline to guarantee progress", async () => {
+    const baseDirectory = await base();
+    const namespace = uniqueNamespace("deadline-progress");
+    const orphan = await deadWorkspace(baseDirectory, namespace);
+    await writeFile(join(orphan, "payload"), "data");
+    const originalNow = Date.now;
+    let now = 0;
+    Date.now = () => now;
+    try {
+      const report = await reapTempLeasesWithRuntime(
+        { baseDirectory, namespace, maxDurationMs: 10 },
+        {
+          rename,
+          async removeIncrementally(path, options) {
+            now = 11;
+            return removeIncrementally(path, options);
+          },
+        },
+      );
+      assert.equal(report.reaped.length, 1);
+      assert.equal(report.progressed.length, 0);
+      await assert.rejects(lstat(orphan), { code: "ENOENT" });
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
+  it("rolls a claim back when queueing an incomplete chunk fails", async () => {
+    const baseDirectory = await base();
+    const namespace = uniqueNamespace("queue-rollback");
+    const orphan = await deadWorkspace(baseDirectory, namespace);
+    let renameCalls = 0;
+
+    const report = await reapTempLeasesWithRuntime(
+      { baseDirectory, namespace, maxRetries: 0 },
+      {
+        async rename(source, destination) {
+          renameCalls += 1;
+          if (renameCalls === 2) {
+            throw Object.assign(new Error("queue unavailable"), {
+              code: "EACCES",
+            });
+          }
+          await rename(source, destination);
+        },
+        async removeIncrementally() {
+          return {
+            complete: false,
+            reason: "entry-budget",
+            removedBytes: 0,
+            visitedEntries: 1,
+          };
+        },
+      },
+    );
+
+    assert.equal(renameCalls, 3);
+    assert.equal(report.truncated, true);
+    assert.equal(report.progressed.length, 0);
+    assert.equal(report.errors.length, 1);
+    assert.equal(report.errors[0]?.operation, "queue");
+    assert.equal((await lstat(orphan)).isDirectory(), true);
+    assert.equal(
+      (await readdir(dirname(orphan))).some((name) =>
+        name.startsWith(".reaping-v1-"),
+      ),
+      false,
+    );
   });
 
   it("removes a sparse workspace larger than the former default byte ceiling", async () => {

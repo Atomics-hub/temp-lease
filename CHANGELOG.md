@@ -14,4 +14,5 @@ All notable changes to this project will be documented here.
 - Retry transient claim and removal failures with bounded configurable backoff.
 - Retry incomplete automatic recovery instead of caching partial passes.
 - Preserve the claimed handle path when a post-rename inspection fails.
+- Guarantee forward progress when a claimed chunk crosses the pass deadline.
 - Ship ESM, CommonJS, and TypeScript declarations with no runtime dependencies.
