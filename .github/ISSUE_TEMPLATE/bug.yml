@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible temp-lease problem
+title: "[bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: Reproduction
+      description: Include a minimal repository or code sample.
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Node.js version
+    validations:
+      required: true
+  - type: input
+    attributes:
+      label: Operating system and filesystem
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Recovery receipt
+      description: Remove sensitive paths, then include reaped, skipped, errors, and truncated.

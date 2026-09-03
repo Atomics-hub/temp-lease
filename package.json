@@ -1,0 +1,110 @@
+{
+  "name": "temp-lease",
+  "version": "0.1.0",
+  "description": "Crash-recoverable temporary workspaces for Node.js.",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "AUDIT.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean --sourcemap --splitting false",
+    "check": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "oxlint src test scripts",
+    "test": "tsx --test --test-concurrency=1 test/unit/*.test.ts",
+    "test:coverage": "c8 tsx --test --test-concurrency=1 test/unit/*.test.ts",
+    "test:stress": "tsx test/stress.ts",
+    "test:runtime": "node test/runtime-smoke.mjs",
+    "test:size": "node test/size.mjs",
+    "test:package": "node test/package-smoke.mjs",
+    "test:publint": "publint",
+    "test:types-package": "attw --pack .",
+    "verify": "npm run format:check && npm run lint && npm run check && npm run test:coverage && npm run build && npm run test:stress && npm run test:runtime && npm run test:size && npm run test:publint && npm run test:types-package && npm run test:package && npm pack --dry-run",
+    "prepublishOnly": "npm run verify",
+    "release:check": "node scripts/check-release.mjs"
+  },
+  "keywords": [
+    "temp",
+    "temporary-directory",
+    "temporary-files",
+    "cleanup",
+    "crash-recovery",
+    "sigkill",
+    "workspace",
+    "ci",
+    "filesystem"
+  ],
+  "author": "Atomics Hub",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Atomics-hub/temp-lease.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Atomics-hub/temp-lease/issues"
+  },
+  "homepage": "https://github.com/Atomics-hub/temp-lease#readme",
+  "packageManager": "npm@11.6.0",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "c8": {
+    "all": true,
+    "include": [
+      "src/**/*.ts"
+    ],
+    "exclude": [
+      "src/types.ts"
+    ],
+    "check-coverage": true,
+    "lines": 85,
+    "statements": 85,
+    "functions": 90,
+    "branches": 80,
+    "reporter": [
+      "text"
+    ]
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
+    "@types/node": "^20.19.25",
+    "c8": "^12.0.0",
+    "fast-check": "^4.9.0",
+    "oxlint": "^1.80.0",
+    "prettier": "^3.9.0",
+    "publint": "^0.3.24",
+    "tsup": "^8.5.1",
+    "tsx": "^4.23.1",
+    "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "esbuild": "^0.28.2"
+  }
+}

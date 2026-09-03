@@ -1,0 +1,7 @@
+coverage/
+examples/
+scripts/
+src/
+test/
+tsconfig.json
+tsup.config.ts
